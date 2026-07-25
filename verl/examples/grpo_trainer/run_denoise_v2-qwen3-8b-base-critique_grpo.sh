@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
+export WANDB_MODE=offline
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 export MODEL_NAME=${MODEL_NAME:-Qwen3-8B-Base}

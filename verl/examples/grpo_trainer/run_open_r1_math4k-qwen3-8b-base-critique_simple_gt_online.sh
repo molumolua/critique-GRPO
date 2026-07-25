@@ -3,7 +3,7 @@ set -x
 ray stop
 ROOT=/verl
 export PYTHONPATH=$ROOT:$PYTHONPATH
-
+export WANDB_MODE=offline
 # WANDB (optional)
 export PROJECT_NAME=verl_train
 export WANDB_API_KEY=
