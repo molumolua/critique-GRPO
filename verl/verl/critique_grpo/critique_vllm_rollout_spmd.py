@@ -336,6 +336,7 @@ class CRITIQUEvLLMRollout(BaseRollout):
             # Validation must measure the same direct model response as
             # DenoiseRL-v2, without critique/refinement augmentation.
             if 'tgt_input_ids' in prompts.batch and not is_validate:
+                refinement_device = prompts.batch['tgt_input_ids'].device
                 print("non_tensor_batch keys: ", non_tensor_batch.keys()) # dict_keys(['reward_model', 'target', 'tools_kwargs'])
                 from concurrent.futures import ThreadPoolExecutor
                 from typing import Dict, Any
@@ -532,7 +533,7 @@ class CRITIQUEvLLMRollout(BaseRollout):
                         refinement['refinement'],  # Access the refinement text from the dictionary
                         add_special_tokens=False,
                         return_tensors='pt'
-                    )['input_ids'].to(device=tgt_input_ids.device)  # Match device with target inputs
+                    )['input_ids'].to(device=refinement_device)  # Match device with target inputs
                     
                     # Pad or truncate to max_refinement_len
                     if refinement_input_ids.size(1) < max_refinement_len:
@@ -540,7 +541,7 @@ class CRITIQUEvLLMRollout(BaseRollout):
                         padding = torch.full(
                             (1, max_refinement_len - refinement_input_ids.size(1)),
                             self.tokenizer.pad_token_id,
-                            device=tgt_input_ids.device
+                            device=refinement_device
                         )
                         refinement_input_ids = torch.cat([refinement_input_ids, padding], dim=1)
                     else:
@@ -556,7 +557,7 @@ class CRITIQUEvLLMRollout(BaseRollout):
                     # Handle case with no refinements
                     refinement_input_ids = torch.empty((0, max_refinement_len), 
                                                     dtype=torch.long,
-                                                    device=tgt_input_ids.device)
+                                                    device=refinement_device)
 
                 tgt_input_ids = refinement_input_ids  # [bsz, tgt_len]
                 print("tgt_input_ids shape: ", tgt_input_ids.shape)            # print("tgt_input_ids: ", tgt_input_ids)
