@@ -24,7 +24,7 @@ from verl.trainer.ppo.ray_trainer import RayPPOTrainer
 # from .critique_ray_trainer import RayPPOTrainer
 from verl.trainer.ppo.reward import load_reward_manager
 
-from verl.utils.reward_score import hf_math_verify
+from .reward_utils import compute_score
 ray.init(
     _system_config={
         "worker_register_timeout_seconds": 3000,
@@ -68,14 +68,7 @@ def get_custom_reward_fn(config):
     return wrapped_fn
 
 def _default_compute_score(data_source, solution_str, ground_truth):
-    # elif "kk" in data_source:
-    #     return kk.compute_score(solution_str, ground_truth)
-    # if "simplelr" in data_source or "open_r1_qwen" in data_source or "sk1" in data_source:
-    return hf_math_verify.compute_score(solution_str, ground_truth)
-    # elif "deepseek_r1" in data_source:
-    #     return deepseek_r1.compute_score(solution_str, ground_truth)
-    # else:
-    #     raise NotImplementedError
+    return compute_score(data_source, solution_str, ground_truth)
 
 
 class RewardManager():
@@ -138,7 +131,8 @@ class RewardManager():
 
             # select rm_score
             data_source = data_item.non_tensor_batch['data_source']
-            score_dict = hf_math_verify.compute_score(
+            score_dict = self.compute_score(
+                data_source=data_source,
                 solution_str=sequences_str,
                 ground_truth=ground_truth,
             )

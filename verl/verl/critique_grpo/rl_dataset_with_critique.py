@@ -35,6 +35,19 @@ from verl.utils.torch_functional import pad_sequence_to_length
 logger = logging.getLogger(__name__)
 
 
+def _has_usable_wrong_solution(wrong_solutions) -> bool:
+    if wrong_solutions is None:
+        return False
+    if isinstance(wrong_solutions, str):
+        candidates = [wrong_solutions]
+    else:
+        try:
+            candidates = list(wrong_solutions)
+        except TypeError:
+            return False
+    return any(isinstance(candidate, str) and candidate.strip() for candidate in candidates)
+
+
 def collate_fn(data_list: list[dict]) -> dict:
     """Collate a batch of data."""
     tensors = defaultdict(list)
@@ -118,6 +131,25 @@ class RLHFDataset(Dataset):
 
         print(f"dataset len: {len(self.dataframe)}")
 
+        # Match the effective DenoiseRL-v2 training pool. Validation files do
+        # not have this column and therefore remain untouched.
+        if (
+            self.config.get("filter_usable_wrong_solutions", False)
+            and "wrong_answer_with_boxed" in self.dataframe.column_names
+        ):
+            original_size = len(self.dataframe)
+            kept_indices = [
+                index
+                for index, item in enumerate(self.dataframe)
+                if _has_usable_wrong_solution(item.get("wrong_answer_with_boxed"))
+            ]
+            self.dataframe = self.dataframe.select(kept_indices)
+            print(
+                "filtered rows without usable wrong_answer_with_boxed: "
+                f"removed={original_size - len(kept_indices)}, "
+                f"pool_size={len(kept_indices)}, original_size={original_size}"
+            )
+
         # filter out too long prompts
         if self.filter_overlong_prompts:
             tokenizer = self.tokenizer
@@ -166,6 +198,17 @@ class RLHFDataset(Dataset):
         Note that we also return the raw_input_ids so that it can be combined with other chat template
         """
         row_dict: dict = self.dataframe[item]
+        # DenoiseRL stores the question in the last user message rather than
+        # duplicating it under reward_model.question.  Critique generation
+        # expects the latter, so derive it in memory without rewriting parquet.
+        reward_model = row_dict.get("reward_model")
+        if isinstance(reward_model, dict) and not reward_model.get("question"):
+            for message in reversed(row_dict.get(self.prompt_key, [])):
+                if message.get("role") == "user":
+                    reward_model = dict(reward_model)
+                    reward_model["question"] = message.get("content", "")
+                    row_dict["reward_model"] = reward_model
+                    break
         # print(row_dict.keys())
         # print(f"target key: {self.target_key}")
         # print(f"row_dict keys: {row_dict.keys()}")

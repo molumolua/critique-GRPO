@@ -447,6 +447,7 @@ class CRITIQUEDataParallelPPOActor(BasePPOActor):
                             loss_agg_mode=loss_agg_mode,
                         )
 
+                    entropy_loss = torch.zeros((), device=pg_loss.device, dtype=pg_loss.dtype)
                     if entropy_coeff != 0:
                         entropy_loss = agg_loss(loss_mat=entropy, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
 

@@ -45,9 +45,9 @@ from verl.third_party.vllm import vllm_version
 from verl.utils.debug import GPUMemoryLogger
 from verl.utils.torch_functional import get_response_mask, pad_2d_list_to_length
 from verl.workers.rollout.base import BaseRollout
-from verl.utils.reward_score import hf_math_verify
-from verl.mix_src.critique_prompts import generate_critique
-from verl.mix_src.refinement_prompts import generate_refinement
+from .critique_prompts import generate_critique
+from .refinement_prompts import generate_refinement
+from .reward_utils import compute_score
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 import copy
@@ -333,7 +333,9 @@ class CRITIQUEvLLMRollout(BaseRollout):
                     response.append(output.outputs[sample_id].token_ids)
 
             tgt_input_ids = None
-            if 'tgt_input_ids' in prompts.batch: # in train mode
+            # Validation must measure the same direct model response as
+            # DenoiseRL-v2, without critique/refinement augmentation.
+            if 'tgt_input_ids' in prompts.batch and not is_validate:
                 print("non_tensor_batch keys: ", non_tensor_batch.keys()) # dict_keys(['reward_model', 'target', 'tools_kwargs'])
                 from concurrent.futures import ThreadPoolExecutor
                 from typing import Dict, Any
@@ -346,6 +348,8 @@ class CRITIQUEvLLMRollout(BaseRollout):
                         non_tensor_batch["reward_model"] = _repeat_interleave(non_tensor_batch["reward_model"], self.sampling_params.n)
                     if 'target' in non_tensor_batch.keys():
                         non_tensor_batch["target"] = _repeat_interleave(non_tensor_batch["target"], self.sampling_params.n)
+                    if 'data_source' in non_tensor_batch.keys():
+                        non_tensor_batch["data_source"] = _repeat_interleave(non_tensor_batch["data_source"], self.sampling_params.n)
 
                 def process_item(args):
                     """Process a single item for critique and refinement generation."""
@@ -359,14 +363,20 @@ class CRITIQUEvLLMRollout(BaseRollout):
                         
                         # Process non-tensor data with safety checks
                         reward_model_data = non_tensor_data_item.get('reward_model', {})
-                        target_data = non_tensor_data_item.get('target', [{}])[0] if 'target' in non_tensor_data_item else {}
+                        target_data = non_tensor_data_item.get('target', {})
+                        if isinstance(target_data, (list, tuple, np.ndarray)):
+                            target_data = target_data[0] if len(target_data) else {}
+                        if not isinstance(target_data, dict):
+                            target_data = {}
+                        data_source = non_tensor_data_item.get('data_source', '')
                         
                         critique_sample = {
                             "question": reward_model_data.get('question', ''),
                             "target": target_data.get('content', ''),
                             "response": sequences_str,
                             "gt": reward_model_data.get('ground_truth', ''),
-                            "score": hf_math_verify.compute_score(
+                            "score": compute_score(
+                                data_source=data_source,
                                 solution_str=sequences_str,
                                 ground_truth=reward_model_data.get('ground_truth', ''),
                             ).get("score", 0.0),
@@ -381,6 +391,10 @@ class CRITIQUEvLLMRollout(BaseRollout):
                             critique_sample, 
                             self.tokenizer
                         )
+                        # The original implementation never bounded this derived
+                        # prompt. Match DenoiseRL's left-truncation policy and
+                        # keep it inside the configured 8192-token prompt budget.
+                        refinement_prompt_ids = refinement_prompt_ids[-self.config.prompt_length :]
                         # print("refinement prompt:", refinement_prompt)
                         # print("refinement prompt ids:", refinement_prompt_ids)
                         
@@ -413,7 +427,8 @@ class CRITIQUEvLLMRollout(BaseRollout):
                             {"initial_response": init_response[i]},  # Extract i-th item from each tensor
                             {
                                 'reward_model': non_tensor_data['reward_model'][i],
-                                'target': non_tensor_data.get('target', [{}])[i] if 'target' in non_tensor_data else {}
+                                'target': non_tensor_data.get('target', [{}])[i] if 'target' in non_tensor_data else {},
+                                'data_source': non_tensor_data['data_source'][i] if 'data_source' in non_tensor_data else '',
                             }
                         ))
                     except IndexError as e:
@@ -465,10 +480,11 @@ class CRITIQUEvLLMRollout(BaseRollout):
                         # Process tensor data
                         refinement = data_item['refinement']
                         reward_model_data = non_tensor_data_item.get('reward_model', {})
-                        score = hf_math_verify.compute_score(
-                                solution_str=refinement,
-                                ground_truth=reward_model_data.get('ground_truth', ''),
-                            ).get("score", 0.0)
+                        score = compute_score(
+                            data_source=non_tensor_data_item.get('data_source', ''),
+                            solution_str=refinement,
+                            ground_truth=reward_model_data.get('ground_truth', ''),
+                        ).get("score", 0.0)
                         return {"refinement": refinement, "score": score, "ground_truth": reward_model_data.get('ground_truth', '')}
                     except Exception as e:
                         logger.error(f"Error processing refinement item {i}: {str(e)}")
@@ -483,7 +499,8 @@ class CRITIQUEvLLMRollout(BaseRollout):
                             {'refinement': refinement_responses[i]},
                             {
                                 'reward_model': non_tensor_data['reward_model'][i],
-                                'target': non_tensor_data.get('target', [{}])[i] if 'target' in non_tensor_data else {}
+                                'target': non_tensor_data.get('target', [{}])[i] if 'target' in non_tensor_data else {},
+                                'data_source': non_tensor_data['data_source'][i] if 'data_source' in non_tensor_data else '',
                             }
                         ))
                     except IndexError as e:
@@ -505,8 +522,7 @@ class CRITIQUEvLLMRollout(BaseRollout):
                 ## convert to tensor
                 # import torch
                 # refinement_score_tensor = torch.tensor(refinement_scores, dtype=torch.float32, device=tgt_input_ids.device)
-                max_refinement_len = 6144
-                # max_refinement_len = 8192
+                max_refinement_len = self.config.response_length
                 refinement_input_ids_list = []
                 # print("tgt_input_ids device: ", tgt_input_ids.device) # cuda:0
 
@@ -583,7 +599,7 @@ class CRITIQUEvLLMRollout(BaseRollout):
                 tgt_list = None
 
             response = pad_2d_list_to_length(response, self.pad_token_id, max_length=self.config.response_length).to(idx.device)
-            if 'tgt_input_ids' in prompts.batch:
+            if tgt_list is not None:
                 # put the prefix back to the response
                 try:
                     resp_list = [

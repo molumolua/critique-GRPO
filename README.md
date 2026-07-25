@@ -31,6 +31,26 @@ chmod +x verl/examples/grpo_trainer/run_open_r1_math4k-qwen3-8b-base-critique_si
 bash verl/examples/grpo_trainer/run_open_r1_math4k-qwen3-8b-base-critique_simple_gt_online.sh
 ```
 
+### DenoiseRL-v2-aligned offline baselines
+
+Two recipes align Critique-GRPO with the DenoiseRL-v2 4B and 8B runs. They use
+the same local model family, train/evaluation parquet files, batch size,
+16-rollout group size, 8192/4096 prompt/response limits, sampling parameters,
+token-mean loss, PPO clipping, optimizer schedule, validation cadence, and
+four-GPU layout. The training pool also applies DenoiseRL-v2's ordered
+`wrong_answer_with_boxed` usability filter (6332 of 7500 local rows). Hugging
+Face and W&B are offline by default.
+
+```bash
+bash verl/examples/grpo_trainer/run_denoise_v2-qwen3-4b-base-critique_grpo.sh
+bash verl/examples/grpo_trainer/run_denoise_v2-qwen3-8b-base-critique_grpo.sh
+```
+
+The recipes expect `DenoiseRL` to be a sibling directory by default. Set
+`DENOISE_ROOT`, `MODEL_PATH`, `TRAIN_FILE`, or the `VAL_*` variables to other
+local paths when needed. `CRITIQUE_TYPE=simple_gt` performs critique generation
+locally and never calls the optional Azure/OpenAI path.
+
 Please email Xiaoying at zhangxycuhk@gmail.com with any questions. (Note that CUHK-related email addresses are no longer functional.)
 
 ## Ackowledgement
@@ -49,4 +69,3 @@ If you find this work useful, please cite:
   journal={arXiv preprint arXiv:2506.03106},
   year={2025}
 }
-

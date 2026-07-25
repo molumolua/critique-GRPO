@@ -918,10 +918,13 @@ class RayPPOTrainer:
                     batch_keys=batch_keys_to_pop,
                     non_tensor_batch_keys=non_tensor_batch_keys_to_pop,
                 )
-                #  "reward_model", "target"
+                # Critique generation needs these metadata fields. DenoiseRL
+                # has no supervised `target` column, so copy it only when
+                # present and use reward_model.ground_truth for simple_gt.
                 import copy
-                gen_batch.non_tensor_batch["reward_model"] = copy.deepcopy(batch.non_tensor_batch["reward_model"])
-                gen_batch.non_tensor_batch["target"] = copy.deepcopy(batch.non_tensor_batch["target"])
+                for key in ("reward_model", "target", "data_source"):
+                    if key in batch.non_tensor_batch:
+                        gen_batch.non_tensor_batch[key] = copy.deepcopy(batch.non_tensor_batch[key])
                 
 
                 is_last_step = self.global_steps >= self.total_training_steps

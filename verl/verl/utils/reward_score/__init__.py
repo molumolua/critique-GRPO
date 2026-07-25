@@ -19,6 +19,18 @@ def _default_compute_score(data_source, solution_str, ground_truth, extra_info=N
         from . import gsm8k
 
         res = gsm8k.compute_score(solution_str, ground_truth)
+    elif data_source == "bbeh":
+        from . import bbeh
+
+        res = bbeh.compute_score(solution_str, ground_truth)
+    elif data_source.startswith(("think", "logic", "scaler")):
+        from . import think_test_math
+
+        res = think_test_math.compute_score(solution_str, ground_truth)
+    elif data_source.startswith("option"):
+        from . import choice_base_problems
+
+        res = choice_base_problems.compute_score(solution_str, ground_truth)
     elif data_source in ["lighteval/MATH", "DigitalLearningGmbH/MATH-lighteval"]:
         from . import math
 
@@ -63,7 +75,9 @@ def _default_compute_score(data_source, solution_str, ground_truth, extra_info=N
 
         res = geo3k.compute_score(solution_str, ground_truth)
     else:
-        raise NotImplementedError(f"Reward function is not implemented for {data_source=}")
+        from . import think_test_math
+
+        res = think_test_math.compute_score(solution_str, ground_truth)
 
     if isinstance(res, dict):
         return res
