@@ -344,14 +344,6 @@ class CRITIQUEvLLMRollout(BaseRollout):
 
                 logger = logging.getLogger(__name__)
 
-                if self.sampling_params.n > 1 and do_sample:
-                    if 'reward_model' in non_tensor_batch.keys():
-                        non_tensor_batch["reward_model"] = _repeat_interleave(non_tensor_batch["reward_model"], self.sampling_params.n)
-                    if 'target' in non_tensor_batch.keys():
-                        non_tensor_batch["target"] = _repeat_interleave(non_tensor_batch["target"], self.sampling_params.n)
-                    if 'data_source' in non_tensor_batch.keys():
-                        non_tensor_batch["data_source"] = _repeat_interleave(non_tensor_batch["data_source"], self.sampling_params.n)
-
                 def process_item(args):
                     """Process a single item for critique and refinement generation."""
                     i, data_item, non_tensor_data_item = args
@@ -408,6 +400,11 @@ class CRITIQUEvLLMRollout(BaseRollout):
                 # Make deep copies of the data for thread safety
                 init_response = copy.deepcopy(response)
                 non_tensor_data = copy.deepcopy(prompts.non_tensor_batch)
+                if self.sampling_params.n > 1 and do_sample:
+                    non_tensor_data = {
+                        key: _repeat_interleave(value, self.sampling_params.n)
+                        for key, value in non_tensor_data.items()
+                    }
                 
                 logger.debug(f"Data batch size: {len(init_response)}")
                 logger.debug(f"Non-tensor data keys: {non_tensor_data.keys()}")
@@ -666,11 +663,10 @@ class CRITIQUEvLLMRollout(BaseRollout):
                 attention_mask = _repeat_interleave(attention_mask, self.sampling_params.n)
                 position_ids = _repeat_interleave(position_ids, self.sampling_params.n)
                 batch_size = batch_size * self.sampling_params.n
-                if "multi_modal_inputs" in non_tensor_batch.keys():
-                    non_tensor_batch["multi_modal_inputs"] = _repeat_interleave(non_tensor_batch["multi_modal_inputs"], self.sampling_params.n)
-                # NOTE(linjunrong): for multi-turn https://github.com/volcengine/verl/pull/1037
-                if "tools_kwargs" in non_tensor_batch.keys():
-                    non_tensor_batch["tools_kwargs"] = _repeat_interleave(non_tensor_batch["tools_kwargs"], self.sampling_params.n)
+                non_tensor_batch = {
+                    key: _repeat_interleave(value, self.sampling_params.n)
+                    for key, value in non_tensor_batch.items()
+                }
 
             seq = torch.cat([idx, response], dim=-1)
 
