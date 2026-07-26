@@ -13,8 +13,16 @@ def compute_score(solution_str, ground_truth):
     acc = 0
     try:
         acc, _ = verify_func([ground_truth], [solution_str])
-    except (Exception, TimeoutException):
+    except TimeoutException:
         pass
+    except Exception as exc:
+        # Math-Verify uses signal.alarm() for parsing timeouts and therefore
+        # raises when called from a ThreadPoolExecutor. Do not turn evaluator
+        # infrastructure failures into an indistinguishable incorrect answer.
+        raise RuntimeError(
+            "Math-Verify scoring failed. Run think_test_math.compute_score "
+            "outside ThreadPoolExecutor worker threads."
+        ) from exc
 
     reward = 1.0 if acc else 0.0
     return {

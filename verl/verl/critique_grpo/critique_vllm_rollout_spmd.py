@@ -338,8 +338,6 @@ class CRITIQUEvLLMRollout(BaseRollout):
             if 'tgt_input_ids' in prompts.batch and not is_validate:
                 refinement_device = prompts.batch['tgt_input_ids'].device
                 print("non_tensor_batch keys: ", non_tensor_batch.keys()) # dict_keys(['reward_model', 'target', 'tools_kwargs'])
-                from concurrent.futures import ThreadPoolExecutor
-                from typing import Dict, Any
                 import logging
 
                 logger = logging.getLogger(__name__)
@@ -432,9 +430,10 @@ class CRITIQUEvLLMRollout(BaseRollout):
                     except IndexError as e:
                         raise IndexError(f"Index {i} out of bounds for either tensor or non-tensor data") from e
 
-                # Process in parallel
-                with ThreadPoolExecutor(max_workers=min(96, len(args))) as executor:
-                    results = list(executor.map(process_item, args))
+                # These paths call Math-Verify. Its timeout mechanism uses
+                # signal.alarm(), which is unsupported in ThreadPoolExecutor
+                # threads and previously made every score zero.
+                results = list(map(process_item, args))
                 refinement_ids = [item[1] for item in results]
 
                 # print("refinement_ids len:", len(refinement_ids)) # 56
@@ -505,8 +504,7 @@ class CRITIQUEvLLMRollout(BaseRollout):
                         raise IndexError(f"Index {i} out of bounds for refinement processing") from e
                 
                 refinement_dicts = []
-                with ThreadPoolExecutor(max_workers=min(96, len(refine_args))) as executor:
-                    refinement_results = list(executor.map(process_refinement_item, refine_args))
+                refinement_results = list(map(process_refinement_item, refine_args))
                 for refine_item in refinement_results:
                     refinement_dicts.append({
                         'refinement': refine_item["refinement"],

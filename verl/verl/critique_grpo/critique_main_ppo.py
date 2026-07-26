@@ -79,6 +79,7 @@ class RewardManager():
         self.tokenizer = tokenizer
         self.num_examine = num_examine  # the number of batches of decoded responses to print to the console
         self.compute_score = compute_score or _default_compute_score
+        self._validated_reward_sources = set()
 
     def __call__(self, data: DataProto, return_dict=False):
         """We will expand this function gradually based on the available datasets"""
@@ -92,7 +93,6 @@ class RewardManager():
 
         reward_tensor = torch.zeros_like(data.batch['responses'], dtype=torch.float32)
         reward_extra_info = defaultdict(list)
-        from concurrent.futures import ThreadPoolExecutor
 
         def process_item(args):
             i, data_item = args
@@ -109,6 +109,24 @@ class RewardManager():
             ground_truth = data_item.non_tensor_batch['reward_model']['ground_truth']
 
             data_source = data_item.non_tensor_batch['data_source']
+            if data_source not in self._validated_reward_sources:
+                self_check = self.compute_score(
+                    data_source=data_source,
+                    solution_str=ground_truth,
+                    ground_truth=ground_truth,
+                )
+                if float(self_check["score"]) <= 0:
+                    raise RuntimeError(
+                        "Reward evaluator self-check failed for "
+                        f"data_source={data_source!r}: ground truth did not "
+                        "receive a positive score."
+                    )
+                print(
+                    "[reward self-check] "
+                    f"data_source={data_source!r}, score={self_check['score']}"
+                )
+                self._validated_reward_sources.add(data_source)
+
             score_dict = self.compute_score(
                 data_source=data_source,
                 solution_str=response_str,
@@ -116,9 +134,12 @@ class RewardManager():
             )
             return i, score_dict, valid_response_length
 
-        with ThreadPoolExecutor(max_workers=96) as executor:
-            args = [(i, data[i]) for i in range(len(data))]
-            results = list(executor.map(process_item, args))
+        # Math-Verify relies on signal.alarm() and cannot run inside
+        # ThreadPoolExecutor workers. Serial scoring matches VERL's standard
+        # NaiveRewardManager and prevents every math score from silently
+        # becoming zero.
+        args = [(i, data[i]) for i in range(len(data))]
+        results = list(map(process_item, args))
         
         for i, score_dict, valid_response_length in results:
             

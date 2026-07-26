@@ -1016,6 +1016,22 @@ class RayPPOTrainer:
                         if reward_extra_infos_dict:
                             batch.non_tensor_batch.update({k: np.array(v) for k, v in reward_extra_infos_dict.items()})
 
+                        # Track whether the injected refinement actually
+                        # produces reward separately from ordinary rollouts.
+                        if "prefix_mask" in batch.batch:
+                            sequence_scores = reward_tensor.sum(dim=-1)
+                            refinement_rows = batch.batch["prefix_mask"].any(dim=-1)
+                            base_rows = ~refinement_rows
+                            metrics["reward/refinement/count"] = refinement_rows.sum().item()
+                            if refinement_rows.any():
+                                refinement_scores = sequence_scores[refinement_rows]
+                                metrics["reward/refinement/mean"] = refinement_scores.mean().item()
+                                metrics["reward/refinement/max"] = refinement_scores.max().item()
+                            if base_rows.any():
+                                base_scores = sequence_scores[base_rows]
+                                metrics["reward/base/mean"] = base_scores.mean().item()
+                                metrics["reward/base/max"] = base_scores.max().item()
+
                         # compute rewards. apply_kl_penalty if available
                         if self.config.algorithm.use_kl_in_reward:
                             batch, kl_metrics = apply_kl_penalty(batch, kl_ctrl=self.kl_ctrl_in_reward, kl_penalty=self.config.algorithm.kl_penalty)
