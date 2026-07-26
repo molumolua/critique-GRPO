@@ -92,48 +92,26 @@ class RewardManager():
 
         reward_tensor = torch.zeros_like(data.batch['responses'], dtype=torch.float32)
         reward_extra_info = defaultdict(list)
-        # correctness_tensor = torch.zeros(len(data), dtype=torch.float32)
-        already_print_data_sources = {}
-
         from concurrent.futures import ThreadPoolExecutor
-        from typing import Dict, Any
 
         def process_item(args):
             i, data_item = args
-            # print("data item for critique reward model eval: ", data_item)
             prompt_ids = data_item.batch['prompts']
-            # print("prompt ids for critique reward model eval: ", prompt_ids)
-
             prompt_length = prompt_ids.shape[-1]
 
-            valid_prompt_length = data_item.batch['attention_mask'][:prompt_length].sum()
-            valid_prompt_ids = prompt_ids[-valid_prompt_length:]
-
             response_ids = data_item.batch['responses']
-            # print("eval response_ids: ", response_ids)
-            # raw_response_str = self.tokenizer.decode(response_ids)
-            # print("raw response str: ", raw_response_str)
-
             valid_response_length = data_item.batch['attention_mask'][prompt_length:].sum()
             valid_response_ids = response_ids[:valid_response_length]
 
-            # decode
-            sequences = torch.cat((valid_prompt_ids, valid_response_ids))
-            sequences_str = self.tokenizer.decode(sequences)
-
-            # import pdb; pdb.set_trace()
-            # print("data item: ", data_item)
-            # print("item reward model keys: ", data_item.non_tensor_batch['reward_model'].keys())
+            # DenoiseRL evaluators expect the generated response only. Including
+            # the prompt can pollute MMLU-Pro's option-letter extraction.
+            response_str = self.tokenizer.decode(valid_response_ids, skip_special_tokens=True)
             ground_truth = data_item.non_tensor_batch['reward_model']['ground_truth']
-            
-            # print("data item reward model: ", data_item.non_tensor_batch['reward_model'])
-            # print("data item keys: ", data_item.non_tensor_batch.keys())
 
-            # select rm_score
             data_source = data_item.non_tensor_batch['data_source']
             score_dict = self.compute_score(
                 data_source=data_source,
-                solution_str=sequences_str,
+                solution_str=response_str,
                 ground_truth=ground_truth,
             )
             return i, score_dict, valid_response_length
